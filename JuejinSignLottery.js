@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         myTest-beta
+// @name         掘金稀土-签到抽奖
 // @namespace    x8q7@https://www.baidu.com/
 // @version      0.0.1
-// @description  try to take over the world!
+// @description  掘金稀土 转盘抽奖脚本
 // @author       x8q7
 // @match        https://juejin.cn/
 // @match        https://juejin.cn/user/center/signin?from=*
