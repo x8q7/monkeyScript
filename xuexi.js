@@ -171,7 +171,7 @@ function getVideoTag() {
 //type:0为新闻，1为视频
 async function reading(type) {
     //看文章或者视频
-    let time = parseInt(Math.random() * (90 - 75 + 1) + 75, 10);//75-90秒后关闭页面
+    let time = parseInt(Math.random() * (100 - 80 + 1) + 80, 10);//80-100秒后关闭页面
     let firstTime = time - 2;
     let secendTime = 12;
     let scrollLength = document.body.scrollHeight / 2;
