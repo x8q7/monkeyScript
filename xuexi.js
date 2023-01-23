@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         不学习何以强国-beta
+// @name         学习强国仅供个人使用。
 // @namespace    http://tampermonkey.net/
-// @version      999
-// @description  读文章,看视频，做习题。
-// @author       荷包蛋。
+// @version      20220805
+// @description  问题反馈位置： https://github.com/TechXueXi/techxuexi-js/issues 。读,看，做。
+// @author       wwd。
 // @match        https://www.xuexi.cn
 // @match        https://www.xuexi.cn/*
 // @match        https://pc.xuexi.cn/points/exam-practice.html
@@ -11,13 +11,14 @@
 // @match        https://pc.xuexi.cn/points/exam-weekly-list.html
 // @match        https://pc.xuexi.cn/points/exam-paper-detail.html?id=*
 // @match        https://pc.xuexi.cn/points/exam-paper-list.html
-// @require      https://cdn.jsdelivr.net/npm/jquery@3.5.1/dist/jquery.min.js
-// @require      https://cdn.bootcdn.net/ajax/libs/blueimp-md5/2.9.0/js/md5.min.js
+// @require      https://ajax.aspnetcdn.com/ajax/jQuery/jquery-3.5.1.min.js
+// @require      https://cdn.jsdelivr.net/npm/blueimp-md5@2.9.0
 // @grant        GM_addStyle
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_deleteValue
 // @grant        GM_openInTab
+// @license       wwd all
 // ==/UserScript==
 var study_css = ".egg_study_btn{outline:0;border:0;position:fixed;top:5px;left:5px;padding:12px 20px;border-radius:10px;cursor:pointer;background-color:#fff;color:#d90609;font-size:18px;font-weight:bold;text-align:center;box-shadow:0 0 9px #666777}.egg_manual_btn{transition:0.5s;outline:none;border:none;padding:12px 20px;border-radius:10px;cursor:pointer;background-color:#e3484b;color:rgb(255,255,255);font-size:18px;font-weight:bold;text-align:center;}.egg_auto_btn{transition:0.5s;outline:none;border:none;padding:12px 20px;border-radius:10px;cursor:pointer;background-color:#666777;color:rgb(255,255,255);font-size:18px;font-weight:bold;text-align:center;}.egg_setting_box{position:fixed;top:70px;left:5px;padding:12px 20px;border-radius:10px;background-color:#fff;box-shadow:0 0 9px #666777}.egg_setting_item{margin-top:5px;height:30px;width:140px;font-size:16px;display:flex;justify-items:center;justify-content:space-between}input[type='checkbox'].egg_setting_switch{cursor:pointer;margin:0;outline:0;appearance:none;-webkit-appearance:none;-moz-appearance:none;position:relative;width:40px;height:22px;background:#ccc;border-radius:50px;transition:border-color .3s,background-color .3s}input[type='checkbox'].egg_setting_switch::after{content:'';display:inline-block;width:1rem;height:1rem;border-radius:50%;background:#fff;box-shadow:0,0,2px,#999;transition:.4s;top:3px;position:absolute;left:3px}input[type='checkbox'].egg_setting_switch:checked{background:#fd5052}input[type='checkbox'].egg_setting_switch:checked::after{content:'';position:absolute;left:55%;top:3px}";
 GM_addStyle(study_css);
@@ -61,12 +62,29 @@ var pause = false;//是否暂停答题
 var examWeeklyPageNo = 1;
 //每周答题总页码
 var examWeeklyTotalPageCount = null;
+//每周答题开启逆序答题: false: 顺序答题; true: 逆序答题
+var examWeeklyReverse = false;
 //专项答题当前页码
 var examPaperPageNo = 1;
 //专项答题总页码
 var examPaperTotalPageCount = null;
+//专项答题开启逆序答题: false: 顺序答题; true: 逆序答题
+var examPaperReverse = false;
 //每周答题，专项答题 请求rate 限制 每 3000ms 一次
 const ratelimitms = 3000;
+
+//默认情况下, chrome 只允许 window.close 关闭 window.open 打开的窗口,所以我们就要用window.open命令,在原地网页打开自身窗口再关上,就可以成功关闭了
+function closeWin() {
+    try {
+        window.opener = window;
+        var win = window.open("", "_self");
+        win.close();
+        top.close();
+    } catch (e) {
+    }
+
+}
+
 $(document).ready(function () {
     let url = window.location.href;
     if (url == "https://www.xuexi.cn" || url == "https://www.xuexi.cn/" || url == "https://www.xuexi.cn/index.html") {
@@ -79,7 +97,7 @@ $(document).ready(function () {
                 createStartButton();
             }
         }, 800);
-    } else if (url == GM_getValue("readingUrl")) {
+    } else if (typeof GM_getValue("readingUrl") != 'object' && url == GM_getValue("readingUrl")) {
         try {
             let settingTemp = JSON.parse(GM_getValue('studySetting'));
             if (!settingTemp[7]) {
@@ -90,7 +108,7 @@ $(document).ready(function () {
             createTip();//创建学习提示
             reading(0);
         }
-    } else if (url == GM_getValue("watchingUrl")) {
+    } else if (typeof GM_getValue("watchingUrl") != 'object' && url == GM_getValue("watchingUrl")) {
         try {
             let settingTemp = JSON.parse(GM_getValue('studySetting'));
             if (!settingTemp[7]) {
@@ -152,18 +170,36 @@ function getVideoTag() {
     let iframe = document.getElementsByTagName("iframe")[0];
     let video = null;
     let pauseButton = null;
-    if (iframe) {
-        //如果有iframe,说明外面的video标签是假的
-        video = iframe.contentWindow.document.getElementsByTagName("video")[0];
-        pauseButton = iframe.contentWindow.document.getElementsByClassName("prism-play-btn")[0];
-    } else {
-        //否则这个video标签是真的
-        video = document.getElementsByTagName("video")[0];
-        pauseButton = document.getElementsByClassName("prism-play-btn")[0];
+    var u = navigator.userAgent;
+    if (u.indexOf('Mac') > -1) {//Mac
+        // if (iframe.innerHTML) {
+        //     //如果有iframe,说明外面的video标签是假的
+        //     video = iframe.contentWindow.document.getElementsByTagName("video")[0];
+        //     pauseButton = iframe.contentWindow.document.getElementsByClassName("prism-play-btn")[0];
+        // } else {
+            //否则这个video标签是真的
+            video = document.getElementsByTagName("video")[0];
+            pauseButton = document.getElementsByClassName("prism-play-btn")[0];
+        // }
+        return {
+            "video": video,
+            "pauseButton": pauseButton
+        }
     }
-    return {
-        "video": video,
-        "pauseButton": pauseButton
+    else {
+        // if (iframe) {
+        //     //如果有iframe,说明外面的video标签是假的
+        //     video = iframe.contentWindow.document.getElementsByTagName("video")[0];
+        //     pauseButton = iframe.contentWindow.document.getElementsByClassName("prism-play-btn")[0];
+        // } else {
+            //否则这个video标签是真的
+            video = document.getElementsByTagName("video")[0];
+            pauseButton = document.getElementsByClassName("prism-play-btn")[0];
+        // }
+        return {
+            "video": video,
+            "pauseButton": pauseButton
+        }
     }
 }
 
@@ -171,7 +207,12 @@ function getVideoTag() {
 //type:0为新闻，1为视频
 async function reading(type) {
     //看文章或者视频
-    let time = parseInt(Math.random() * (100 - 80 + 1) + 80, 10);//80-100秒后关闭页面
+    var time = 1;
+    if (type == 0) {
+        time = parseInt(Math.random() * (100 - 80 + 1) + 80, 10);//80-100秒后关闭页面，看文章
+    } else {
+        time = parseInt(Math.random() * (250 - 230 + 1) + 230, 10);//230-250秒后关闭页面，看视频
+    }
     let firstTime = time - 2;
     let secendTime = 12;
     let scrollLength = document.body.scrollHeight / 2;
@@ -201,7 +242,7 @@ async function reading(type) {
                 GM_setValue('watchingUrl', null);
             }
             clearInterval(readingInterval);
-            window.close();
+            closeWin();
         }
     }, 1000);
     //关闭文章或视频页面
@@ -353,12 +394,35 @@ function doExamPractice() {
         }, 1000);
     });
 }
-//获取专项答题列表
-function getExamPaper() {
+
+//fix code = 429
+async function waitingDependStartTime(startTime) {
+    let remainms = Date.now() - startTime;
+    if (remainms < ratelimitms) {
+        await waitingTime(ratelimitms - remainms + 1000)
+    }
+}
+//初始化专项答题总页数属性
+async function InitExamPaperAttr() {
+    let startTime = Date.now();
+    var data = await getExamPaperByPageNo(1); // 默认从第一页获取全部页属性
+    if (data) {
+        // 初始化总页码
+        examPaperTotalPageCount = data.totalPageCount;
+        // 若专项答题逆序, 则从最后一页开始
+        if (examPaperReverse) {
+            examPaperPageNo = examPaperTotalPageCount;
+        }
+    }
+    await waitingDependStartTime(startTime);
+}
+
+//获取指定页数的专项答题列表
+function getExamPaperByPageNo(examPaperPageNoParam) {
     return new Promise(function (resolve) {
         $.ajax({
             type: "GET",
-            url: ExamPaperListUrl.replace("{pageNo}", examPaperPageNo),
+            url: ExamPaperListUrl.replace("{pageNo}", examPaperPageNoParam),
             xhrFields: {
                 withCredentials: true //如果没有这个请求失败
             },
@@ -375,21 +439,25 @@ function getExamPaper() {
         });
     })
 }
+
 //查询专项答题列表看看还有没有没做过的，有则返回id
 async function findExamPaper() {
     var continueFind = true;
     var examPaperId = null;
-    console.log("正在寻找未完成的专项答题")
+    console.log("初始化专项答题属性");
+    await InitExamPaperAttr();
+    console.log("正在寻找未完成的专项答题");
     while (continueFind) {
         let startTime = Date.now();
 
-        await getExamPaper().then(async (data) => {
+        await getExamPaperByPageNo(examPaperPageNo).then(async (data) => {
             if (data) {
-                if (examPaperTotalPageCount == null) {
-                    //如果总页码没初始化，则初始化
-                    examPaperTotalPageCount = data.totalPageCount;
-                }
                 let examPapers = data.list;//获取专项答题的列表
+                if (examPaperReverse) {
+                    // 若开启逆序答题, 则反转专项答题列表
+                    console.log("专项答题,开启逆序模式,从最早的题目开始答题");
+                    examPapers.reverse();
+                }
                 for (let j = 0; j < examPapers.length; j++) {
                     //遍历查询有没有没做过的
                     if (examPapers[j].status != 2) {//status： 1为"开始答题" , 2为"重新答题"
@@ -401,9 +469,11 @@ async function findExamPaper() {
                 }
                 if (!continueFind) {
                 } else {
-                    //增加页码
-                    examPaperPageNo++;
-                    if (examPaperTotalPageCount == null || examPaperPageNo > examPaperTotalPageCount) {
+                    //增加页码 (若开启逆序翻页, 则减少页码)
+                    examPaperPageNo += examPaperReverse ? -1 : 1;
+                    if (examPaperTotalPageCount == null
+                        || examPaperPageNo > examPaperTotalPageCount
+                        || examPaperPageNo < 1) {
                         //已经找完所有页码，还是没找到，不再继续查找
                         continueFind = false;
                     }
@@ -411,16 +481,13 @@ async function findExamPaper() {
             } else {
                 continueFind = false;
             }
-
             //fix code = 429
-            let remainms = Date.now() - startTime;
-            if (remainms < ratelimitms) {
-                await waitingTime(ratelimitms - remainms + 1000)
-            }
+            await waitingDependStartTime(startTime);
         })
     }
     return examPaperId;
 }
+
 //做专项答题
 function doExamPaper() {
     return new Promise(function (resolve) {
@@ -442,12 +509,28 @@ function doExamPaper() {
         });
     })
 }
-//获取每周答题列表
-function getExamWeekly() {
+
+//初始化每周答题总页数属性
+async function InitExamWeeklyAttr() {
+    let startTime = Date.now();
+    var data = await getExamWeeklyByPageNo(1); // 默认从第一页获取全部页属性
+    if (data) {
+        // 初始化总页码
+        examWeeklyTotalPageCount = data.totalPageCount;
+        // 若每周答题逆序, 则从最后一页开始
+        if (examWeeklyReverse) {
+            examWeeklyPageNo = examWeeklyTotalPageCount;
+        }
+    }
+    await waitingDependStartTime(startTime);
+}
+
+//获取指定页数的每周答题列表
+function getExamWeeklyByPageNo(examWeeklyPageNoParam) {
     return new Promise(function (resolve) {
         $.ajax({
             type: "GET",
-            url: ExamWeeklyListUrl.replace("{pageNo}", examWeeklyPageNo),
+            url: ExamWeeklyListUrl.replace("{pageNo}", examWeeklyPageNoParam),
             xhrFields: {
                 withCredentials: true //如果没有这个请求失败
             },
@@ -464,21 +547,29 @@ function getExamWeekly() {
         });
     })
 }
+
 //查询每周答题列表看看还有没有没做过的，有则返回id
 async function findExamWeekly() {
     var continueFind = true;
     var examWeeklyId = null;
-    console.log("正在寻找未完成的每周答题")
+    console.log("初始化每周答题");
+    await InitExamWeeklyAttr();
+    console.log("正在寻找未完成的每周答题");
     while (continueFind) {
         let startTime = Date.now();
-        await getExamWeekly().then(async (data) => {
+        await getExamWeeklyByPageNo(examWeeklyPageNo).then(async (data) => {
             if (data) {
-                if (examWeeklyTotalPageCount == null) {
-                    //如果总页码没初始化，则初始化
-                    examWeeklyTotalPageCount = data.totalPageCount;
+                if (examWeeklyReverse) {
+                    // 若开启逆序答题, 则反转列表
+                    console.log("每周答题,开启逆序模式,从最早的题目开始答题");
+                    data.list.reverse();
                 }
                 for (let i = 0; i < data.list.length; i++) {
                     let examWeeks = data.list[i].practices;//获取每周的测试列表
+                    if (examWeeklyReverse) {
+                        // 若开启逆序, 则反转每周的测试列表
+                        examWeeks.reverse();
+                    }
                     for (let j = 0; j < examWeeks.length; j++) {
                         //遍历查询有没有没做过的
                         if (examWeeks[j].status != 2) {//status： 1为"开始答题" , 2为"重新答题"
@@ -496,8 +587,10 @@ async function findExamWeekly() {
                 if (!continueFind) {
                 } else {
                     //增加页码
-                    examWeeklyPageNo++;
-                    if (examWeeklyTotalPageCount == null || examWeeklyPageNo > examWeeklyTotalPageCount) {
+                    examWeeklyPageNo += examWeeklyReverse ? -1 : 1;
+                    if (examWeeklyTotalPageCount == null
+                        || examWeeklyPageNo > examWeeklyTotalPageCount
+                        || examWeeklyPageNo < 1) {
                         //已经找完所有页码，还是没找到，不再继续查找
                         continueFind = false;
                     }
@@ -507,10 +600,7 @@ async function findExamWeekly() {
             }
 
             //fix code = 429
-            let remainms = Date.now() - startTime;
-            if (remainms < ratelimitms) {
-                await waitingTime(ratelimitms - remainms + 1000)
-            }
+            await waitingDependStartTime(startTime);
         })
     }
     return examWeeklyId;
@@ -589,7 +679,7 @@ async function doingExam() {
         //选项按钮
         var allbuttons = document.querySelectorAll(".q-answer");
         //获取所有填空
-        var blanks = document.querySelectorAll("input[type=text]");
+        var blanks = document.querySelectorAll("input[type=text][class=blank]");
         try {
             //获取问题类型
             var questionType = document.querySelector(".q-header").textContent;
@@ -771,7 +861,7 @@ async function doingExam() {
             break;
         }
     }
-    window.close();
+    closeWin();
 }
 //获取关键字
 function getKey() {
@@ -980,9 +1070,13 @@ async function start() {
             //查询今天还有什么任务没做完
             console.log("检查今天还有什么任务没做完")
             taskProgress = await getToday();
+            console.log(taskProgress);
+            console.log("tasks");
+            console.log(tasks);
+            console.log("settings");
+            console.log(settings);
             if (taskProgress != null) {
                 console.log("开始学习")
-
                 //检查新闻
                 if (settings[0] && taskProgress[0].currentScore != taskProgress[0].dayMaxScore) {
                     tasks[0] = false;//只要还有要做的，就当做没完成
@@ -995,7 +1089,7 @@ async function start() {
 
                 //检查视频
                 let temp = parseInt(taskProgress[1].dayMaxScore - taskProgress[1].currentScore);
-                let temp2 = parseInt(taskProgress[3].dayMaxScore - taskProgress[3].currentScore);
+                let temp2 = parseInt(taskProgress[2].dayMaxScore - taskProgress[2].currentScore);
                 if (settings[1] && (temp != 0 || temp2 != 0)) {
                     tasks[1] = false;//只要还有要做的，就当做没完成
                     videoNum = temp > temp2 ? temp : temp2;//还需要看多少个视频
@@ -1006,7 +1100,7 @@ async function start() {
                 }
 
                 //检查每日答题
-                if (settings[6] && taskProgress[6].currentScore != taskProgress[6].dayMaxScore) {
+                if (settings[6] && taskProgress[5].currentScore != taskProgress[5].dayMaxScore) {
                     tasks[2] = false;//只要还有要做的，就当做没完成
                     console.log("3.做每日答题");
                     await doExamPractice();
